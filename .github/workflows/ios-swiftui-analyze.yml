@@ -17,6 +17,9 @@ jobs:
   xcode_analyze:
     name: Xcode Analyze
     runs-on: macos-latest
+    env:
+      BITRISE_BUILD_CACHE_WORKSPACE_ID: 26e1bb55524221dd
+      BITRISE_BUILD_CACHE_AUTH_TOKEN: ${{ secrets.BITRISE_BUILD_CACHE_AUTH_TOKEN }}
 
     steps:
       - name: Checkout
@@ -26,6 +29,19 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode_26.2.app
       - name: Check Xcode Version
         run: xcodebuild -version
+
+      - name: Activate Bitrise Build Cache for Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl --retry 5 -sSfL \
+            https://raw.githubusercontent.com/bitrise-io/bitrise-build-cache-cli/main/install/installer.sh \
+            -o /tmp/bitrise-build-cache-installer.sh
+          bash /tmp/bitrise-build-cache-installer.sh -b /tmp/bin -d
+          /tmp/bin/bitrise-build-cache activate xcode --cache --cache-push
+
+          echo "$HOME/.bitrise-xcelerate/bin" >> "$GITHUB_PATH"
 
       - name: Install XCLogParser
         run: brew install xclogparser
