@@ -1,0 +1,109 @@
+name: iOS SwiftUI Analyze
+#
+# Runs `xcodebuild analyze` and reports build timings via XCLogParser.
+#
+# Purpose: show which tasks take the longest, as a baseline for build
+# performance work.
+#
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  xcode_analyze:
+    name: Xcode Analyze
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.2.app
+      - name: Check Xcode Version
+        run: xcodebuild -version
+
+      - name: Install XCLogParser
+        run: brew install xclogparser
+
+      - name: Analyze
+        run: |
+          # Create directory for result bundle
+          mkdir -p build-results
+
+          # Run analyze with result bundle path to generate xcactivitylog
+          xcodebuild "analyze" \
+            "-project" "samples-ios-swift-swiftui.xcodeproj" \
+            "-scheme" "samples-ios-swift-swiftui" \
+            "-showBuildTimingSummary" \
+            "-resultBundlePath" "build-results/analyze-result.xcresult" \
+            "CODE_SIGNING_ALLOWED=NO" \
+            "COMPILER_INDEX_STORE_ENABLE=NO"
+
+      - name: Parse Build Timing with XCLogParser
+        if: always()
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          # Locate the newest xcactivitylog and hand it to XCLogParser via
+          # --file. Honours BITRISE_XCODE_DERIVED_DATA_PATH so this keeps
+          # working if xcodebuild is pointed at a custom -derivedDataPath.
+          derived_data_root="${BITRISE_XCODE_DERIVED_DATA_PATH:-$HOME/Library/Developer/Xcode/DerivedData}"
+
+          activity_log=""
+          if [ -d "$derived_data_root" ]; then
+            activity_log="$(find "$derived_data_root" -type f -name '*.xcactivitylog' -path '*/Logs/Build/*' -exec stat -f '%m %N' {} + | sort -rn | head -n 1 | cut -d' ' -f2-)"
+          fi
+
+          if [ -z "$activity_log" ]; then
+            echo "❌ No xcactivitylog found under $derived_data_root"
+            exit 1
+          fi
+
+          echo "Parsing build log: $activity_log"
+
+          # Parse to JSON format for analysis
+          xclogparser parse \
+            --file "$activity_log" \
+            --reporter json \
+            --output build-results/build-timing.json
+
+          # Parse to HTML format for visualization
+          xclogparser parse \
+            --file "$activity_log" \
+            --reporter html \
+            --output build-results/build-timing.html
+
+          # Parse to Chrome Tracer format for detailed timeline visualization
+          xclogparser parse \
+            --file "$activity_log" \
+            --reporter chromeTracer \
+            --output build-results/build-timing.json.gz
+
+          echo "✅ Build timing reports generated"
+
+      - name: Display Build Timing Summary
+        if: always()
+        run: |
+          if [ -f build-results/build-timing.json ]; then
+            .github/workflows/analyze-cache-effectiveness.sh build-results/build-timing.json
+          else
+            echo "⚠️  Build timing JSON not found - XCLogParser may have failed"
+          fi
+
+      - name: Upload Build Timing Reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-timing-reports
+          path: |
+            build-results/build-timing.json
+            build-results/build-timing.html
+            build-results/build-timing.json.gz
+            build-results/analyze-result.xcresult
+          retention-days: 30

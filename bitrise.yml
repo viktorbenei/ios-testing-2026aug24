@@ -1,0 +1,129 @@
+---
+format_version: '23'
+default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
+project_type: ios
+pipelines:
+  samples-ios-swift-swiftui-run_tests:
+    workflows:
+      samples-ios-swift-swiftui-build_for_testing: {}
+      samples-ios-swift-swiftui-test_without_building:
+        depends_on:
+        - samples-ios-swift-swiftui-build_for_testing
+        parallel: "$TEST_SHARD_COUNT"
+workflows:
+  _set_common_env_vars:
+    envs:
+    - TEST_SHARD_COUNT: 2
+    - BITRISE_PROJECT_PATH: samples-ios-swift-swiftui.xcodeproj
+      opts:
+        is_expand: false
+    - BITRISE_SCHEME: samples-ios-swift-swiftui
+      opts:
+        is_expand: false
+    - BITRISE_DISTRIBUTION_METHOD: ad-hoc
+      opts:
+        is_expand: false
+    - XCODETEST_DESTINATION: 'platform=iOS Simulator,name=Bitrise iOS default,OS=27.0'
+  samples-ios-swift-swiftui-archive_and_export_app:
+    summary: Run your Xcode tests and create an IPA file to install your app on a
+      device or share it with your team.
+    description: The workflow will first clone your Git repository, cache and
+      install your project's dependencies if any, run your Xcode tests, export
+      an IPA file from the project and save it.
+    meta:
+      bitrise.io:
+        stack: osx-xcode-27.0.x-edge
+        machine_type_id: g2.mac.4large
+    before_run:
+    - _set_common_env_vars
+    steps:
+    - bundle::setup: {}
+    - xcode-test@6:
+        inputs:
+        - project_path: "$BITRISE_PROJECT_PATH"
+        - scheme: "$BITRISE_SCHEME"
+        - test_repetition_mode: retry_on_failure
+        - cache_level: none
+        - destination: $XCODETEST_DESTINATION
+    - xcode-archive@5:
+        inputs:
+        - project_path: "$BITRISE_PROJECT_PATH"
+        - scheme: "$BITRISE_SCHEME"
+        - distribution_method: "$BITRISE_DISTRIBUTION_METHOD"
+        - automatic_code_signing: api-key
+        - cache_level: none
+    - deploy-to-bitrise-io@2: {}
+  samples-ios-swift-swiftui-build_for_testing:
+    meta:
+      bitrise.io:
+        stack: osx-xcode-27.0.x-edge
+        machine_type_id: g2.mac.4large
+    before_run:
+    - _set_common_env_vars
+    steps:
+    - bundle::setup: {}
+    - restore-spm-cache@1: {}
+    - xcode-build-for-test@3:
+        inputs:
+        - project_path: "$BITRISE_PROJECT_PATH"
+        - scheme: "$BITRISE_SCHEME"
+        - destination: generic/platform=iOS Simulator
+        - cache_level: none
+    - save-spm-cache@1: {}
+    - xcode-test-shard-calculation@0:
+        inputs:
+        - shard_count: "$TEST_SHARD_COUNT"
+        - product_path: "$BITRISE_XCTESTRUN_FILE_PATH"
+    - deploy-to-bitrise-io@2:
+        inputs:
+        - pipeline_intermediate_files: |-
+            BITRISE_TEST_SHARDS_PATH
+            BITRISE_TEST_BUNDLE_PATH
+  samples-ios-swift-swiftui-run_tests:
+    summary: Run your Xcode tests and get the test report.
+    description: The workflow will first clone your Git repository, cache and
+      install your project's dependencies if any, run your Xcode tests and save
+      the test results.
+    meta:
+      bitrise.io:
+        stack: osx-xcode-27.0.x-edge
+        machine_type_id: g2.mac.4large
+    before_run:
+    - _set_common_env_vars
+    steps:
+    - bundle::setup: {}
+    - restore-spm-cache@1: {}
+    - xcode-test@6:
+        inputs:
+        - project_path: "$BITRISE_PROJECT_PATH"
+        - scheme: "$BITRISE_SCHEME"
+        - test_repetition_mode: retry_on_failure
+        - cache_level: none
+        - destination: $XCODETEST_DESTINATION
+    - save-spm-cache@1: {}
+    - deploy-to-bitrise-io@2: {}
+    triggers:
+      push:
+      - branch: main
+      pull_request:
+      - target_branch: '*'
+        source_branch: '*'
+  samples-ios-swift-swiftui-test_without_building:
+    meta:
+      bitrise.io:
+        stack: osx-xcode-27.0.x-edge
+        machine_type_id: g2.mac.4large
+    before_run:
+    - _set_common_env_vars
+    steps:
+    - pull-intermediate-files@1: {}
+    - xcode-test-without-building@0:
+        inputs:
+        - only_testing: "$BITRISE_TEST_SHARDS_PATH/$BITRISE_IO_PARALLEL_INDEX"
+        - xctestrun: "$BITRISE_TEST_BUNDLE_PATH/all_tests.xctestrun"
+step_bundles:
+  setup:
+    steps:
+    - activate-ssh-key@4:
+        run_if: '{{getenv "SSH_RSA_PRIVATE_KEY" | ne ""}}'
+    - git-clone@8: {}
